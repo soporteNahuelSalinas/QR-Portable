@@ -17,7 +17,7 @@ def dynamic_path(relative_path):
     return os.path.join(os.getcwd(), relative_path)
 
 def limpiar_carpetas():
-    carpetas_a_limpiar = ["qrcodes-manuales", "output_pdfs"]
+    carpetas_a_limpiar = ["qrcodes-manuales"]
     
     for carpeta in carpetas_a_limpiar:
         if os.path.exists(carpeta):
@@ -36,7 +36,7 @@ def index():
     if request.method == 'POST':
         file = request.files['file']
         if file and file.filename.endswith('.csv'):
-            limpiar_carpetas()
+            limpiar_carpetas()  # Limpiar solo la carpeta de QR
             
             ids_productos = []
             csv_file = csv.DictReader(file.stream.read().decode('utf-8').splitlines(), delimiter=';')
@@ -75,7 +75,7 @@ def generate():
 @app.route("/generate_cards", methods=["POST"])
 def generate_cards_route():
     try:
-        merged_pdf_path = generate_cards()
+        merged_pdf_path = generate_cards()  # Llamamos a la función que genera el PDF
         
         if os.path.exists(merged_pdf_path):
             return send_file(merged_pdf_path, as_attachment=True, download_name="tarjetas_productos.pdf")
@@ -85,6 +85,18 @@ def generate_cards_route():
     except Exception as e:
         flash(f"Error al generar las tarjetas: {str(e)}", "error")
         return redirect(url_for("index"))
+
+@app.route('/clear_pdfs', methods=['POST'])
+def clear_pdfs():
+    output_folder = dynamic_path("output_pdfs")
+    if os.path.exists(output_folder):
+        for archivo in os.listdir(output_folder):
+            archivo_path = os.path.join(output_folder, archivo)
+            try:
+                os.remove(archivo_path)  # Borra archivos
+            except Exception as e:
+                print(f"Error eliminando {archivo_path}: {e}")
+    return redirect(url_for('index'))
 
 if __name__ == '__main__':
     app.run(debug=True)

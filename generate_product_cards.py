@@ -2,18 +2,15 @@ import sys
 import os
 import re
 import math
-from PIL import Image, ImageDraw, ImageFont
 import textwrap
+from PIL import Image, ImageDraw, ImageFont
 from PyPDF2 import PdfMerger
 
 # Configuración general
 dpi = 300
 a4_width, a4_height = int(8.27 * dpi), int(11.69 * dpi)
 card_width, card_height = 780, 340
-output_folder = "output_pdfs"
-qr_folder = "qrcodes-manuales"
 page_color = "#D4C3C3"
-qr_max_height = card_height - int(0.1 * dpi + 2)
 background_color = "#FFFF"
 font_color = "black"
 margin = int(0.01 * dpi)
@@ -24,25 +21,16 @@ max_rows_per_page = 10
 def resource_path(relative_path):
     """Devuelve la ruta absoluta al recurso, tanto en desarrollo como en el ejecutable generado."""
     try:
-        # Si está congelado, sys._MEIPASS contiene la ruta temporal de los archivos
         base_path = sys._MEIPASS
     except AttributeError:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
+# Cargar fuente
 font_path = resource_path(os.path.join("assets", "fonts", "Poppins-Regular.ttf"))
-if not os.path.exists(font_path):
-    raise FileNotFoundError(f"No se encontró la fuente en la ubicación especificada: {font_path}")
-
-# Crear la fuente
 font_size = 30
 font = ImageFont.truetype(font_path, font_size)
 font_large = ImageFont.truetype(font_path, font_size * 2)  # Doble tamaño para el precio
-
-def format_price(price):
-    """ Formatea el precio redondeando hacia arriba a la siguiente decena. """
-    rounded_price = math.ceil(int(price) / 10) * 10  # Redondea siempre hacia arriba
-    return f"AR ${rounded_price:,}".replace(",", ".")
 
 def clean_product_name(filename):
     name = os.path.splitext(filename)[0]
@@ -58,16 +46,28 @@ def clean_product_name(filename):
 
     return clean_name, reference, price
 
+def format_price(price):
+    """ Formatea el precio redondeando hacia arriba a la siguiente decena. """
+    rounded_price = math.ceil(int(price) / 10) * 10  # Redondea siempre hacia arriba
+    return f"AR ${rounded_price:,}".replace(",", ".")
+
 def generate_cards():
+    qr_folder = os.path.join(os.path.abspath("."), "qrcodes-manuales")  # Ruta a los códigos QR dentro de dist
+    output_folder = os.path.join(os.path.abspath("."), "output_pdfs")  # Ruta a guardar PDFs dentro de dist
+    
     os.makedirs(output_folder, exist_ok=True)
     if not os.path.exists(qr_folder):
         raise FileNotFoundError(f"No se encontró el directorio de QR: {qr_folder}")
 
     product_data = []
     for file in os.listdir(qr_folder):
-        if file.endswith(".png"): 
+        if file.endswith(".png"):
             product_name, reference, price = clean_product_name(file)
             product_data.append({"name": product_name, "reference": reference, "price": price, "qr_path": os.path.join(qr_folder, file)})
+
+    if not product_data:
+        print("No se encontraron productos para generar tarjetas.")
+        return
 
     page_count = 1
     x_offset, y_offset = margin, margin
@@ -80,19 +80,20 @@ def generate_cards():
         card_draw = ImageDraw.Draw(card)
 
         qr = Image.open(product["qr_path"])
-        qr_width = int(qr.width * (qr_max_height / qr.height))
-        qr = qr.resize((qr_width, qr_max_height))
+        qr_width = int(qr.width * (card_height / qr.height))
+        qr = qr.resize((qr_width, card_height))
+
         qr_x = card_width - qr.width - margin
         qr_y = (card_height - qr.height) // 2
         card.paste(qr, (qr_x, qr_y))
 
         # Texto CTA debajo del QR
         cta_text = "Ver más info"
-        cta_font = ImageFont.truetype(font_path, 22)
+        cta_font = ImageFont.truetype(font_path, 30)
         cta_bbox = card_draw.textbbox((0, 0), cta_text, font=cta_font)
         cta_width = cta_bbox[2] - cta_bbox[0]
         cta_x = qr_x + (qr.width - cta_width) // 2
-        cta_y = qr_y + qr.height - 25
+        cta_y = qr_y + qr.height - 38  # Ajustar la posición
         card_draw.text((cta_x, cta_y), cta_text, font=cta_font, fill=font_color)
 
         text_max_width = card_width - qr_width - margin * 3
@@ -108,20 +109,19 @@ def generate_cards():
         
         wrapped_text = textwrap.fill(wrapped_text, width=25)
 
+        price_text = product["price"]
+        price_bbox = card_draw.textbbox((0, 0), price_text, font=font_large)
+        price_width = price_bbox[2] - price_bbox[0]
+        price_x = (card_width - price_width) // 2 - 130
+        price_y = margin + 30
+        card_draw.text((price_x, price_y), price_text, font=font_large, fill=font_color)
+
         text_bbox = card_draw.textbbox((0, 0), wrapped_text, font=font)
         text_width = text_bbox[2] - text_bbox[0]
         text_height = text_bbox[3] - text_bbox[1]
 
         text_x = text_x_center_area + (text_max_width - text_width) // 2
         text_y = (card_height - text_height) // 2 + 20
-
-        if product["price"]:
-            price_text = product["price"]
-            price_bbox = card_draw.textbbox((0, 0), price_text, font=font_large)
-            price_width = price_bbox[2] - price_bbox[0]
-            price_x = (card_width - price_width) // 2 - 130
-            price_y = margin + 30
-            card_draw.text((price_x, price_y), price_text, font=font_large, fill=font_color)
 
         final_text = "\n".join([wrapped_text])
         card_draw.multiline_text((text_x, text_y), final_text, font=font, fill=font_color, align="center")
@@ -136,16 +136,16 @@ def generate_cards():
 
         if current_row >= max_rows_per_page:
             output_file = os.path.join(output_folder, f"tarjetas_qr_pagina_{page_count}.pdf")
-            page.save(output_file, resolution=dpi)
+            page.save(output_file)
             pdf_files.append(output_file)
             page_count += 1
             page = Image.new("RGB", (a4_width, a4_height), page_color)
-            x_offset, y_offset = margin, margin 
-            current_row = 0 
+            x_offset, y_offset = margin, margin
+            current_row = 0
 
     if x_offset != margin or y_offset != margin:
         output_file = os.path.join(output_folder, f"tarjetas_qr_pagina_{page_count}.pdf")
-        page.save(output_file, resolution=dpi)
+        page.save(output_file)
         pdf_files.append(output_file)
 
     merged_pdf_path = os.path.join(output_folder, "tarjetas_productos_completo.pdf")
